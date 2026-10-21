@@ -1,0 +1,18 @@
+node_modules/
+dist/
+*.log
+
+# Local credentials and machine-specific configuration
+.env
+.env.*
+!.env.example
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.json
+.DS_Store
+.vscode/
+coverage/
