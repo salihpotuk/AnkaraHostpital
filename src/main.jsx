@@ -229,7 +229,7 @@ function App() {
       setScanError(
         e.name === "AbortError"
           ? "Tarama iptal edildi. Eksik veriyle aday üretilmedi."
-          : `${e.message} İnternet bağlantınızı kontrol edip yeniden deneyin. Eksik veriyle aday üretilmedi.`,
+          : `${e.message} Eksik veriyle aday üretilmedi.`,
       );
     } finally {
       setScanning(false);

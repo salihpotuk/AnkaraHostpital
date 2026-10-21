@@ -147,16 +147,58 @@ test("accepted candidates from different source polygons cannot overlap", () => 
 });
 test("OSM HTTP failures and partial responses fail closed", async () => {
   await assert.rejects(
-    queryOSM("", undefined, async () => ({ ok: false, status: 429 })),
+    queryOSM("", undefined, async () => ({ ok: false, status: 429 }), {
+      endpoints: ["https://example.test/api/interpreter"],
+      rounds: 1,
+      wait: async () => {},
+    }),
     /429/,
   );
   await assert.rejects(
-    queryOSM("", undefined, async () => ({
-      ok: true,
-      json: async () => ({ elements: [], remark: "timeout" }),
-    })),
-    /tamamlanmadı/,
+    queryOSM(
+      "",
+      undefined,
+      async () => ({
+        ok: true,
+        json: async () => ({ elements: [], remark: "timeout" }),
+      }),
+      {
+        endpoints: ["https://example.test/api/interpreter"],
+        rounds: 1,
+        wait: async () => {},
+      },
+    ),
+    /504/,
   );
+});
+test("HTTP 502 switches to a healthy Overpass endpoint", async () => {
+  const called = [];
+  const response = await queryOSM(
+    "",
+    undefined,
+    async (url) => {
+      called.push(url);
+      if (called.length === 1) return { ok: false, status: 502 };
+      return {
+        ok: true,
+        json: async () => ({
+          osm3s: { timestamp_osm_base: "2026-01-01T00:00:00Z" },
+          elements: [],
+        }),
+      };
+    },
+    {
+      endpoints: [
+        "https://first.test/api/interpreter",
+        "https://second.test/api/interpreter",
+      ],
+      rounds: 1,
+      wait: async () => {},
+    },
+  );
+  assert.equal(called.length, 2);
+  assert.equal(response.endpoint, "second.test");
+  assert.equal(response.attempts, 2);
 });
 test("source-to-obstacle OSM pipeline returns only screened candidates with provenance", async () => {
   const osmWay = (id, tags, coords) => ({
