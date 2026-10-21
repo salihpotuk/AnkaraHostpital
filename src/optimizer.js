@@ -15,11 +15,22 @@ export function evaluate(vector,p){
  const score=(p.weight/100)*(cost/5000)+(1-p.weight/100)*((1-coverage)*2+avgDistance/30+shortage*2);
  return {sites,assignments,cost,coverage,avgDistance,shortage,score,totalBeds:sites.reduce((a,s)=>a+s.beds,0)};
 }
+function seededRandom(seed){
+ let state=seed>>>0;
+ return ()=>{state+=0x6D2B79F5;let value=state;value=Math.imul(value^(value>>>15),value|1);value^=value+Math.imul(value^(value>>>7),value|61);return((value^(value>>>14))>>>0)/4294967296;};
+}
+function parameterSeed(p){
+ const text=JSON.stringify([p.count,p.radius,p.weight,p.bedsPerThousand,p.unitCost,p.generations]);
+ let hash=2166136261;
+ for(let i=0;i<text.length;i++){hash^=text.charCodeAt(i);hash=Math.imul(hash,16777619);}
+ return hash>>>0;
+}
 export async function optimize(p,onProgress,signal){
- const size=36,dim=p.count*2;let pop=Array.from({length:size},()=>Array.from({length:dim},()=>Math.random()));let scores=pop.map(v=>evaluate(v,p));let history=[];
+ const random=seededRandom(parameterSeed(p));
+ const size=36,dim=p.count*2;let pop=Array.from({length:size},()=>Array.from({length:dim},()=>random()));let scores=pop.map(v=>evaluate(v,p));let history=[];
  for(let gen=0;gen<p.generations;gen++){
  if(signal?.aborted)throw new Error('cancelled');
- for(let i=0;i<size;i++){const ids=[];while(ids.length<3){const n=Math.floor(Math.random()*size);if(n!==i&&!ids.includes(n))ids.push(n);}const forced=Math.floor(Math.random()*dim);const trial=pop[i].map((v,j)=>Math.random()<.8||j===forced?Math.min(.999999,Math.max(0,pop[ids[0]][j]+.65*(pop[ids[1]][j]-pop[ids[2]][j]))):v);const result=evaluate(trial,p);if(result.score<=scores[i].score){pop[i]=trial;scores[i]=result;}}
+ for(let i=0;i<size;i++){const ids=[];while(ids.length<3){const n=Math.floor(random()*size);if(n!==i&&!ids.includes(n))ids.push(n);}const forced=Math.floor(random()*dim);const trial=pop[i].map((v,j)=>random()<.8||j===forced?Math.min(.999999,Math.max(0,pop[ids[0]][j]+.65*(pop[ids[1]][j]-pop[ids[2]][j]))):v);const result=evaluate(trial,p);if(result.score<=scores[i].score){pop[i]=trial;scores[i]=result;}}
  const best=scores.reduce((a,b)=>a.score<b.score?a:b);history.push(best.score);
  if(gen%4===0||gen===p.generations-1){onProgress({progress:(gen+1)/p.generations,result:best,history:[...history]});await new Promise(r=>setTimeout(r,8));}
  }return scores.reduce((a,b)=>a.score<b.score?a:b);

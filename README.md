@@ -13,7 +13,7 @@ npm test
 npm run build
 ```
 
-Haritada yakınlaştırma/uzaklaştırma, tüm Ankara görünümü, nüfus talebi, aday kareler ve erişim halkaları; hastane detayları ve JSON senaryo indirme bulunur. Parametre değişimi sonucu yeniden hesaplamak gerekir. Algoritma rastlantısaldır, her çalışmada farklı sonuç verebilir.
+Haritada yakınlaştırma/uzaklaştırma, tüm Ankara görünümü, nüfus talebi, aday kareler ve erişim halkaları; hastane detayları ve JSON senaryo indirme bulunur. Parametre değişimi sonucu yeniden hesaplamak gerekir. Algoritma parametrelerden sabit bir rastgelelik tohumu üretir; aynı parametreler aynı sonucu verir.
 
 ## Modelin sınırları
 
@@ -25,6 +25,6 @@ Gerçek kullanım için TÜİK/ADNKS nüfus ızgaraları, kadastro/yapı/imar ve
 
 ## Harita kaynakları
 
-Döşemeler: OpenStreetMap / CARTO. Ağ gerektirir: a/b/c.basemaps.cartocdn.com. Yazı tipleri: Google Fonts (fonts.googleapis.com, fonts.gstatic.com); sistem fontu yedeği vardır.
+Döşemeler: OpenStreetMap. API anahtarı gerekmez; ağ erişimi `tile.openstreetmap.org` alan adına gerekir. Yazı tipleri: Google Fonts (fonts.googleapis.com, fonts.gstatic.com); sistem fontu yedeği vardır.
 
 İl sınırı: https://github.com/alpers/Turkey-Maps-GeoJSON — `tr-cities.json` dosyasından Ankara özelliği ayıklanmıştır. Apache 2.0 lisansı `public/geojson-LICENSE.txt` içindedir. Bu sınır planlama için resmî kadastro doğruluğu sağlamaz.
