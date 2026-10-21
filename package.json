@@ -1,1 +1,23 @@
-{"name":"ankara-hospital-planner","version":"1.0.0","type":"module","scripts":{"dev":"vite --host 0.0.0.0","build":"vite build","test":"node --test src/optimizer.test.js"},"dependencies":{"vite":"^7.1.0","react":"^19.1.1","react-dom":"^19.1.1","leaflet":"^1.9.4","lucide-react":"^0.468.0"},"devDependencies":{}}
+{
+  "name": "ankara-hospital-planner",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "test": "node --test src/*.test.js"
+  },
+  "dependencies": {
+    "@turf/turf": "^7.4.0",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.468.0",
+    "osmtogeojson": "^3.0.0-beta.5",
+    "rbush": "^4.0.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "vite": "^7.1.0"
+  },
+  "overrides": {
+    "@xmldom/xmldom": "^0.9.12"
+  }
+}
