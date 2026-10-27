@@ -38,6 +38,24 @@ const defaults = {
 };
 const num = (n) =>
   new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 1 }).format(n);
+const EARTH_RADIUS = 6371008.8;
+const gridFootprint = (lat, lng) => {
+  const dy = (100 / EARTH_RADIUS) * (180 / Math.PI);
+  const dx =
+    (100 / (EARTH_RADIUS * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI);
+  return {
+    type: "Polygon",
+    coordinates: [
+      [
+        [lng - dx, lat - dy],
+        [lng + dx, lat - dy],
+        [lng + dx, lat + dy],
+        [lng - dx, lat + dy],
+        [lng - dx, lat - dy],
+      ],
+    ],
+  };
+};
 const emptyResult = {
   sites: [],
   assignments: [],
@@ -177,7 +195,11 @@ function MapView({ result, selected, onSelect, layers, focus, candidates }) {
         .slice(0, 6000)
         .forEach((s) => {
           L.geoJSON(
-            { type: "Feature", geometry: s.footprint, properties: {} },
+            {
+              type: "Feature",
+              geometry: gridFootprint(s.lat, s.lng),
+              properties: {},
+            },
             {
               style: {
                 color: s.kind === "hospital-reuse" ? "#ae7a34" : "#43816b",
@@ -227,7 +249,15 @@ function App() {
     [completed, setCompleted] = useState(false),
     [error, setError] = useState("");
   const control = useRef();
-  const land = gridData;
+  const land = useRef({
+    metadata: gridData.metadata,
+    candidates: gridData.candidates.map((candidate) => ({
+      ...candidate,
+      area: 40000,
+      name:
+        candidate.name || `${candidate.district} uygun kare ${candidate.id}`,
+    })),
+  }).current;
   useEffect(() => () => control.current?.abort(), []);
   const dirty = JSON.stringify(p) !== JSON.stringify(result.params || defaults);
   const site = result.sites.find((s) => s.id === selected);

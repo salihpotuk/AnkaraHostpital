@@ -179,13 +179,13 @@ for (const cell of cells.values()) {
       distance(cell, a) < distance(cell, b) ? a : b,
     );
     candidates.push({
-      ...cell,
+      id: cell.id,
+      lat: +cell.lat.toFixed(6),
+      lng: +cell.lng.toFixed(6),
       district: nearest.name,
       name: `${tags(hospital).name || nearest.name + " kamu hastanesi"} · yeniden kullanım`,
       kind: "hospital-reuse",
-      area: 40000,
       land: 20,
-      footprint: footprint.geometry,
       sourceId: hospital.id || tags(hospital).id || null,
     });
     continue;
@@ -201,13 +201,12 @@ for (const cell of cells.values()) {
     distance(cell, a) < distance(cell, b) ? a : b,
   );
   candidates.push({
-    ...cell,
+    id: cell.id,
+    lat: +cell.lat.toFixed(6),
+    lng: +cell.lng.toFixed(6),
     district: nearest.name,
-    name: `${nearest.name} uygun kare ${cell.id}`,
     kind: "grid-empty",
-    area: 40000,
     land: 30,
-    footprint: footprint.geometry,
   });
 }
 candidates.sort((a, b) => a.id.localeCompare(b.id));
