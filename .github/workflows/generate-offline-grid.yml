@@ -1,0 +1,49 @@
+name: Generate offline Ankara grid
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/generate-offline-grid.mjs
+      - src/ankara-boundary.json
+      - src/optimizer.js
+      - .github/workflows/generate-offline-grid.yml
+permissions:
+  contents: write
+concurrency:
+  group: offline-ankara-grid
+  cancel-in-progress: true
+jobs:
+  generate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Install verified OSM tooling
+        run: sudo apt-get update && sudo apt-get install -y osmium-tool
+      - name: Download current Turkey OSM extract
+        run: curl --fail --location --retry 4 --retry-all-errors --output /tmp/turkey.osm.pbf https://download.geofabrik.de/europe/turkey-latest.osm.pbf
+      - name: Verify published checksum
+        run: |
+          curl --fail --location --retry 4 --output /tmp/turkey.osm.pbf.md5 https://download.geofabrik.de/europe/turkey-latest.osm.pbf.md5
+          cd /tmp && md5sum --check turkey.osm.pbf.md5
+      - name: Extract Ankara and relevant structures
+        run: |
+          osmium extract --polygon src/ankara-boundary.json /tmp/turkey.osm.pbf --output /tmp/ankara.osm.pbf --overwrite
+          osmium tags-filter /tmp/ankara.osm.pbf w/building w/building:part w/highway wr/amenity=hospital wr/healthcare=hospital --output /tmp/ankara-filtered.osm.pbf --overwrite
+          osmium export /tmp/ankara-filtered.osm.pbf --output /tmp/ankara-filtered.geojson --overwrite
+      - name: Generate checked 200 metre grid and local context
+        run: node --max-old-space-size=6144 scripts/generate-offline-grid.mjs /tmp/ankara-filtered.geojson src/data
+      - run: npm test && npm run build
+      - name: Commit generated data
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/data/ankara-grid.json src/data/ankara-context.geojson
+          git diff --cached --quiet || git commit -m "data: refresh offline Ankara grid"
+          git push
