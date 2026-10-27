@@ -1,4 +1,6 @@
 import boundary from "./ankara-boundary.json";
+import gridData from "./data/ankara-grid.json";
+import context from "./data/ankara-context.json";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import L from "leaflet";
@@ -23,6 +25,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import "leaflet/dist/leaflet.css";
+import "leaflet.heat";
 import "./style.css";
 import { districts, optimize } from "./optimizer";
 const defaults = {
@@ -53,41 +56,66 @@ const textTooltip = (text) => {
 function MapView({ result, selected, onSelect, layers, focus, candidates }) {
   const el = useRef(),
     map = useRef(),
-    group = useRef();
-  const [tileError, setTileError] = useState(false);
+    group = useRef(),
+    gridGroup = useRef();
   useEffect(() => {
     map.current = L.map(el.current, {
       zoomControl: true,
       attributionControl: true,
     }).setView([39.96, 32.79], 10);
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "© OpenStreetMap contributors",
-      maxZoom: 19,
-      crossOrigin: true,
-    })
-      .on("tileerror", () => setTileError(true))
-      .on("tileload", () => setTileError(false))
-      .addTo(map.current);
+    map.current.getContainer().classList.add("offline-map");
     map.current.zoomControl.setPosition("topright");
     L.geoJSON(boundary, {
       style: {
         color: "#57765a",
         weight: 1.5,
         dashArray: "5 5",
-        fillOpacity: 0.015,
+        fillColor: "#edf1e6",
+        fillOpacity: 0.72,
       },
       interactive: false,
     }).addTo(map.current);
+    L.geoJSON(context, {
+      style: (feature) =>
+        feature.properties?.kind === "public-hospital"
+          ? {
+              color: "#b18042",
+              weight: 1,
+              fillColor: "#dfbd83",
+              fillOpacity: 0.35,
+            }
+          : {
+              color:
+                feature.properties?.highway === "motorway"
+                  ? "#bc9a67"
+                  : "#c6b795",
+              weight: feature.properties?.highway === "motorway" ? 2.2 : 1.2,
+              opacity: 0.75,
+            },
+      interactive: false,
+    }).addTo(map.current);
+    districts.forEach((d) =>
+      L.marker([d.lat, d.lng], {
+        interactive: false,
+        icon: L.divIcon({
+          className: "district-label",
+          html: `<span>${d.name}</span>`,
+          iconSize: [90, 18],
+          iconAnchor: [45, 9],
+        }),
+      }).addTo(map.current),
+    );
     L.control
       .scale({ imperial: false, position: "bottomright" })
       .addTo(map.current);
     group.current = L.layerGroup().addTo(map.current);
+    gridGroup.current = L.layerGroup().addTo(map.current);
     return () => map.current.remove();
   }, []);
   useEffect(() => {
     if (!group.current) return;
     group.current.clearLayers();
-    if (layers.population)
+    if (layers.populationMode === "circle")
       districts.forEach((d) =>
         L.circle([d.lat, d.lng], {
           radius: Math.sqrt(d.pop) * 7,
@@ -98,25 +126,22 @@ function MapView({ result, selected, onSelect, layers, focus, candidates }) {
           interactive: false,
         }).addTo(group.current),
       );
-    if (layers.parcels)
-      candidates.forEach((s) => {
-        L.geoJSON(
-          { type: "Feature", geometry: s.footprint, properties: {} },
-          {
-            style: {
-              color: s.kind === "hospital-reuse" ? "#ae7a34" : "#43816b",
-              weight: 1,
-              fillOpacity: 0.25,
-            },
+    if (layers.populationMode === "heat")
+      L.heatLayer(
+        districts.map((d) => [d.lat, d.lng, Math.sqrt(d.pop) / 1000]),
+        {
+          radius: 52,
+          blur: 38,
+          maxZoom: 12,
+          minOpacity: 0.22,
+          gradient: {
+            0.2: "#d9e9b1",
+            0.45: "#f2d476",
+            0.7: "#e99b55",
+            1: "#bb4f3f",
           },
-        )
-          .bindTooltip(
-            textTooltip(
-              `${s.name} · 10.000 m² · ${s.kind === "hospital-reuse" ? "Kamu hastanesi sahası (yeniden kullanım)" : "OSM boş arazi taraması"}`,
-            ),
-          )
-          .addTo(group.current);
-      });
+        },
+      ).addTo(group.current);
     if (layers.coverage)
       result.sites.forEach((s) =>
         L.circle([s.lat, s.lng], {
@@ -142,6 +167,38 @@ function MapView({ result, selected, onSelect, layers, focus, candidates }) {
     });
   }, [result, selected, layers, candidates]);
   useEffect(() => {
+    if (!map.current || !gridGroup.current) return;
+    const draw = () => {
+      gridGroup.current.clearLayers();
+      if (!layers.parcels || map.current.getZoom() < 11) return;
+      const bounds = map.current.getBounds();
+      candidates
+        .filter((s) => bounds.contains([s.lat, s.lng]))
+        .slice(0, 6000)
+        .forEach((s) => {
+          L.geoJSON(
+            { type: "Feature", geometry: s.footprint, properties: {} },
+            {
+              style: {
+                color: s.kind === "hospital-reuse" ? "#ae7a34" : "#43816b",
+                weight: 0.7,
+                fillOpacity: 0.2,
+              },
+            },
+          )
+            .bindTooltip(
+              textTooltip(
+                `${s.name} · 200 × 200 m · ${s.kind === "hospital-reuse" ? "Kamu hastanesi yeniden kullanım" : "Bina/yol çakışması bulunmayan kare"}`,
+              ),
+            )
+            .addTo(gridGroup.current);
+        });
+    };
+    draw();
+    map.current.on("moveend zoomend", draw);
+    return () => map.current?.off("moveend zoomend", draw);
+  }, [layers.parcels, candidates]);
+  useEffect(() => {
     if (focus && map.current)
       focus.all
         ? map.current.fitBounds(L.geoJSON(boundary).getBounds(), {
@@ -150,33 +207,15 @@ function MapView({ result, selected, onSelect, layers, focus, candidates }) {
           })
         : map.current.flyTo([focus.lat, focus.lng], 17, { duration: 1.2 });
   }, [focus]);
-  return (
-    <>
-      <div className="map" ref={el} />
-      {tileError && (
-        <div className="tile-warning">
-          Altlık harita yüklenemedi. İnternet erişimini kontrol edin; il sınırı
-          ve model katmanları kullanılabilir.
-        </div>
-      )}
-    </>
-  );
+  return <div className="map" ref={el} />;
 }
 function App() {
   const [p, setP] = useState(defaults),
     [result, setResult] = useState(emptyResult),
-    [land, setLand] = useState({ candidates: [], metadata: null }),
-    [includeHospitals, setIncludeHospitals] = useState(true),
-    [scanning, setScanning] = useState(false),
-    [scanStatus, setScanStatus] = useState({
-      stage: "Henüz arazi taraması yapılmadı.",
-      progress: 0,
-    }),
-    [scanError, setScanError] = useState(""),
     [selected, setSelected] = useState(null),
     [focus, setFocus] = useState(null),
     [layers, setLayers] = useState({
-      population: true,
+      populationMode: "heat",
       parcels: true,
       coverage: false,
     }),
@@ -188,53 +227,11 @@ function App() {
     [completed, setCompleted] = useState(false),
     [error, setError] = useState("");
   const control = useRef();
-  const scanControl = useRef();
-  useEffect(
-    () => () => {
-      control.current?.abort();
-      scanControl.current?.abort();
-    },
-    [],
-  );
+  const land = gridData;
+  useEffect(() => () => control.current?.abort(), []);
   const dirty = JSON.stringify(p) !== JSON.stringify(result.params || defaults);
   const site = result.sites.find((s) => s.id === selected);
   const hasResult = result.sites.length > 0;
-  async function scan() {
-    setScanning(true);
-    setScanError("");
-    setLand({ candidates: [], metadata: null });
-    setResult(emptyResult);
-    setSelected(null);
-    setCompleted(false);
-    setHistory([]);
-    scanControl.current = new AbortController();
-    try {
-      const { loadLandCandidates } = await import("./land-data");
-      const data = await loadLandCandidates(
-        boundary,
-        includeHospitals,
-        setScanStatus,
-        scanControl.current.signal,
-      );
-      setLand(data);
-      setScanStatus({
-        progress: 1,
-        stage: `${data.candidates.length} çakışmayan aday bulundu.`,
-      });
-      if (!data.candidates.length)
-        setScanError(
-          "Bu taramada koşulları sağlayan alan bulunamadı. Veri kaydı olmayan yerler boş kabul edilmedi.",
-        );
-    } catch (e) {
-      setScanError(
-        e.name === "AbortError"
-          ? "Tarama iptal edildi. Eksik veriyle aday üretilmedi."
-          : `${e.message} Eksik veriyle aday üretilmedi.`,
-      );
-    } finally {
-      setScanning(false);
-    }
-  }
   function update(k, v) {
     setP((x) => ({ ...x, [k]: Number(v) }));
   }
@@ -263,13 +260,16 @@ function App() {
       setRunning(false);
     }
   }
+  useEffect(() => {
+    if (land.candidates.length >= defaults.count) run();
+  }, []);
   function download() {
     const blob = new Blob(
       [
         JSON.stringify(
           {
             disclaimer:
-              "Illustrative model, not verified parcels or official population data",
+              "Offline OSM grid screening is preliminary; parcels, zoning and population are not officially verified",
             parameters: result.params || defaults,
             landScreening: land.metadata,
             ...result,
@@ -348,111 +348,45 @@ function App() {
             </p>
             <section
               className="land-panel"
-              aria-label="Arazi uygunluk taraması"
+              aria-label="Çevrimdışı arazi ızgarası"
             >
               <div className="block-title">
-                Arazi uygunluk taraması <span>OSM</span>
+                Hazır arazi ızgarası <span>200 × 200 m</span>
               </div>
-              <p>
-                Yalnızca haritada boş/geliştirilmemiş işaretli alanlar taranır.
-                Bina, yol, su ve korunan kullanımlarla çakışan kareler elenir.
-              </p>
-              <label className="hospital-toggle">
-                <input
-                  type="checkbox"
-                  checked={includeHospitals}
-                  disabled={running || scanning}
-                  onChange={(e) => {
-                    setIncludeHospitals(e.target.checked);
-                    setLand({ candidates: [], metadata: null });
-                    setResult(emptyResult);
-                    setCompleted(false);
-                    setHistory([]);
-                    setSelected(null);
-                    setScanError("");
-                    setScanStatus({
-                      stage:
-                        "Seçenek değişti. Arazi taramasını yeniden çalıştırın.",
-                      progress: 0,
-                    });
-                  }}
-                />
-                Kamu hastanesi sahalarını yeniden kullan
-              </label>
-              <small>
-                Bu sahaların kendi binaları ve iç servis yolları senaryo gereği
-                kaldırılabilir sayılır. Özel ve sahipliği belirsiz hastaneler
-                dahil edilmez.
-              </small>
-              <button
-                className="scan-button"
-                disabled={running}
-                onClick={scanning ? () => scanControl.current.abort() : scan}
-              >
-                {scanning ? (
-                  <>
-                    <span className="spinner" /> Taramayı durdur
-                  </>
-                ) : (
-                  <>
-                    <MapPin size={14} />{" "}
-                    {land.metadata
-                      ? "Arazileri yeniden tara"
-                      : "Aday arazileri tara"}
-                  </>
-                )}
-              </button>
-              <p role="status">{scanStatus.stage}</p>
-              {scanning && (
-                <progress
-                  aria-label="Arazi tarama ilerlemesi"
-                  max="1"
-                  value={scanStatus.progress}
-                />
-              )}
-              {scanError && (
-                <p className="scan-error" role="alert">
-                  {scanError}
+              {land.metadata.status === "pending" ? (
+                <p className="scan-error">
+                  Çevrimdışı Ankara ızgarası GitHub Actions tarafından
+                  hazırlanıyor. Veri commit'i tamamlanınca hastaneler otomatik
+                  görünecek.
                 </p>
-              )}
-              {land.metadata && (
+              ) : (
                 <div className="scan-report">
-                  <b>
-                    {
-                      land.candidates.filter((c) => c.kind === "mapped-vacant")
-                        .length
-                    }{" "}
-                    boş arazi adayı ·{" "}
+                  <b>{num(land.metadata.availableCells)} uygun kare hazır</b>
+                  <span>
+                    {num(land.metadata.checkedCells)} kare,{" "}
+                    {num(land.metadata.buildingFeatures)} bina ve{" "}
+                    {num(land.metadata.roadFeatures)} yol kaydı bir kez kontrol
+                    edildi.
+                  </span>
+                  <span>
                     {
                       land.candidates.filter((c) => c.kind === "hospital-reuse")
                         .length
                     }{" "}
-                    hastane sahası
-                  </b>
-                  <span>
-                    {land.metadata.rejected.building} bina,{" "}
-                    {land.metadata.rejected.road} yol,{" "}
-                    {land.metadata.rejected.other} diğer kullanım çakışması
-                    elendi.
+                    kare kamu hastanesi sahası yeniden kullanım adayı.
                   </span>
                   <span>
-                    {land.metadata.sourcesScreened} kaynak saha tarandı;{" "}
-                    {land.metadata.sourcesUnscreened} saha boyut/sorgu sınırı
-                    nedeniyle taranmadı.
-                  </span>
-                  <span>
-                    Veri:{" "}
-                    {new Date(land.metadata.sourceTimestamp).toLocaleDateString(
+                    Üretim:{" "}
+                    {new Date(land.metadata.generatedAt).toLocaleDateString(
                       "tr-TR",
-                    )}{" "}
-                    · Örneklemeli tarama; tüm Ankara'nın boş parsel envanteri
-                    değildir.
+                    )}
                   </span>
                 </div>
               )}
               <small>
-                OSM taraması fiziksel boşluk, mülkiyet ve imar garantisi vermez.
-                Güncel görüntü ve saha kontrolü gerekir.
+                Uygulama açılırken internetten arazi aramaz. Kareler ilçe
+                merkezlerinin nüfusa göre belirlenen planlama çevrelerini
+                kapsar. OSM verisi mülkiyet ve imar garantisi vermez.
               </small>
             </section>
             <div className="tabs">
@@ -628,14 +562,13 @@ function App() {
                 <span>
                   Mevcut hastaneler yok sayılır.
                   <br />
-                  Yalnızca arazi taramasını geçen 10.000 m² adaylar kullanılır.
+                  Yalnızca önceden kontrol edilmiş 200 × 200 m kareler
+                  kullanılır.
                 </span>
               </div>
               <button
                 className="run"
-                disabled={
-                  scanning || (!running && land.candidates.length < p.count)
-                }
+                disabled={!running && land.candidates.length < p.count}
                 onClick={running ? () => control.current.abort() : run}
               >
                 {running ? (
@@ -653,11 +586,10 @@ function App() {
                   </>
                 )}
               </button>
-              {!scanning && land.candidates.length < p.count && (
+              {land.candidates.length < p.count && (
                 <small className="dirty">
-                  {land.candidates.length} taranmış aday var; {p.count} hastane
-                  için yeterli değil. Önce tarayın veya hastane sayısını
-                  azaltın.
+                  Çevrimdışı veri seti henüz hazır değil veya {p.count} hastane
+                  için yeterli aday içermiyor.
                 </small>
               )}
               {dirty && (
@@ -678,7 +610,7 @@ function App() {
               <button
                 className="export"
                 onClick={download}
-                disabled={!hasResult || running || scanning}
+                disabled={!hasResult || running}
               >
                 <Download size={15} /> Senaryoyu indir
               </button>
@@ -698,19 +630,30 @@ function App() {
                   ? "OPTİMİZASYON ÇALIŞIYOR"
                   : completed
                     ? "OPTİMİZE EDİLEN SENARYO"
-                    : scanning
-                      ? "ARAZİ TARAMASI"
-                      : "ARAZİ VERİSİ BEKLENİYOR"}
-                <span className="badge-divider" /> OSM arazi ön incelemesi
+                    : "HAZIR SENARYO YÜKLENİYOR"}
+                <span className="badge-divider" /> Çevrimdışı 200 m ızgara
               </div>
               <div className="layer-panel">
                 <div>
                   <Layers size={15} />
                   <b>Harita katmanları</b>
                 </div>
+                <label className="population-selector">
+                  <span className="legend-dot amber" />
+                  <span>Nüfus görünümü</span>
+                  <select
+                    value={layers.populationMode}
+                    onChange={(e) =>
+                      setLayers({ ...layers, populationMode: e.target.value })
+                    }
+                  >
+                    <option value="heat">Isı haritası</option>
+                    <option value="circle">Daireler</option>
+                    <option value="off">Kapalı</option>
+                  </select>
+                </label>
                 {[
-                  ["population", "Nüfus talebi", "amber"],
-                  ["parcels", "Taranan 10.000 m² alanlar", "sage"],
+                  ["parcels", "Uygun 200 × 200 m kareler", "sage"],
                   ["coverage", "Erişim yarıçapı", "green"],
                 ].map(([key, label, color]) => (
                   <label key={key}>
@@ -728,10 +671,10 @@ function App() {
               </div>
               <div className="map-note">
                 <span className="legend-dot green" /> Önerilen hastane{" "}
-                <span className="legend-dot sage" /> OSM boş alan adayı{" "}
+                <span className="legend-dot sage" /> Uygun 200 m kare{" "}
                 <span className="legend-dot hospital" /> Hastane sahası{" "}
                 <span className="note-light">
-                  Parsel uygunluğu doğrulanmamıştır
+                  © OpenStreetMap contributors · Parsel/imar doğrulanmamıştır
                 </span>
               </div>
               <button
@@ -754,28 +697,24 @@ function App() {
                   </button>
                   <span className="eyebrow">ÖNERİLEN YATIRIM</span>
                   <h3>{site.name}</h3>
-                  <p>{site.beds} yatak · 10.000 m² aday alan</p>
+                  <p>{site.beds} yatak · 40.000 m² (200 × 200 m) aday alan</p>
                   <div className={"site-kind " + site.kind}>
                     {site.kind === "hospital-reuse"
                       ? "Kamu hastanesi sahası · yeniden kullanım"
-                      : "OSM boş/geliştirilmemiş arazi adayı"}
+                      : "Bina ve yol çakışması bulunmayan ızgara karesi"}
                   </div>
                   <p>
                     {site.kind === "hospital-reuse"
                       ? "Bu sahanın mevcut hastane binaları ve iç servis yolları senaryo gereği kaldırılabilir sayıldı. Dış binalar ve kamu yolları muaf tutulmadı."
-                      : "100 × 100 m kare, OSM boş/geliştirilmemiş poligonunun tamamen içinde. Kayıtlı bina (+5 m), yol (genişlik +5 m), su ve korunan kullanımlarla çakışma bulunmadı."}
+                      : "200 × 200 m kare, çevrimdışı OSM verisindeki kayıtlı bina (+5 m) ve yol (genişlik +5 m) geometrileriyle çakışmıyor."}
                   </p>
-                  <a
-                    className="source-link"
-                    href={site.sourceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    OSM kaynak sahayı incele ↗
-                  </a>
                   <small>
-                    Kaynak tarihi:{" "}
-                    {new Date(site.sourceTimestamp).toLocaleDateString("tr-TR")}
+                    Veri üretimi:{" "}
+                    {land.metadata.generatedAt
+                      ? new Date(land.metadata.generatedAt).toLocaleDateString(
+                          "tr-TR",
+                        )
+                      : "hazırlanıyor"}
                     . Harita verisindeki eksikler ve değişiklikler için güncel
                     uydu/saha kontrolü gerekir.
                   </small>
@@ -861,7 +800,7 @@ function App() {
                   </svg>
                 ) : (
                   <span className="pill">
-                    {land.candidates.length} taranmış aday
+                    {land.candidates.length} hazır ızgara adayı
                   </span>
                 )}
               </div>
@@ -906,31 +845,27 @@ function App() {
             <p>
               25 ilçenin yaklaşık, örnek nüfus değerleri ilçe merkezlerinde
               toplanır. Bunlar resmî güncel veriler değildir; mahalle ölçeğinde
-              nüfus yoğunluğu temsil edilmez. Sabit/rastgele aday konumlar
-              kaldırılmıştır. OpenStreetMap'te greenfield/brownfield olarak
-              işaretlenmiş poligonlarda 100 × 100 metre kareler aranır. Kayıtlı
-              binalara 5 m, yollara tahmini yarı genişliği +5 m pay bırakılır.
-              Su, korunan alan, tarım, orman, park ve diğer kayıtlı
-              kullanımlarla çakışan kareler elenir. Kare il sınırının ve kaynak
-              poligonun tamamen içinde olmalıdır. Sadece bina kaydı bulunmaması
-              boşluk kanıtı sayılmaz.
+              nüfus yoğunluğu temsil edilmez. Isı haritası bu ilçe noktalarının
+              yumuşatılmış görselidir. Ankara, ilçe merkezleri çevresinde 200 ×
+              200 metre karelere bölünür. Bir defalık çevrimdışı üretimde
+              OpenStreetMap bina geometrilerine 5 m, yol eksenlerine tahmini
+              yarı genişlik +5 m pay bırakılır; çakışan kareler elenir.
             </p>
             <p>
-              Kamu hastanelerini yeniden kullan seçeneği açıksa, kamu niteliği
-              etiket/ad üzerinden saptanabilen hastane poligonları da adaydır.
-              Kendi binaları, otoparkları ve iç servis yolları kaldırılabilir
-              varsayılır; dış yollar ve diğer kullanımlar elenir. Özel veya kamu
-              niteliği belirsiz hastaneler dahil edilmez. Bunlar boş arazi
-              olarak etiketlenmez, yeniden kullanım olarak gösterilir.
+              Kamu niteliği etiket/ad üzerinden saptanabilen mevcut hastane
+              sınırları yeniden kullanım adayıdır ve kendi yapıları
+              kaldırılabilir varsayılır. Özel veya kamu niteliği belirsiz
+              hastaneler bu istisnaya girmez. Izgara tüm il yüzeyini taramaz:
+              nüfusu 400 bin üzerindeki ilçe merkezlerinde 15 km, 100 bin
+              üzerindekilerde 8 km, 50 bin üzerindekilerde 6 km, diğerlerinde 4
+              km planlama yarıçapı kullanır.
             </p>
             <p>
-              OSM tam veya güncel bir kadastro değildir. Yalnızca kayıtlı aday
-              kaynaklar taranır; 5 km²'den büyük kaynaklar atlanır ve en fazla
-              60 kaynak, kaynak başına yaklaşık 2.500 merkez örneklenir. Atlanan
-              kaynak sayısı ve eleme nedenleri gösterilir. Aday karelerin
-              birbirleriyle çakışması engellenir. Yetersiz aday/veri hatasında
-              optimizasyon çalışmaz. Aynı veri ve parametreler aynı sonucu
-              verir.
+              Veri GitHub Actions tarafından üretilip uygulamayla paketlenir;
+              tarayıcı harita veya arazi API'sine bağlanmaz. OSM tam/güncel bir
+              kadastro değildir. Boş görünen her kare mülkiyet, eğim, zemin,
+              çevre ve imar yönünden ayrıca incelenmelidir. Aynı veri ve
+              parametreler aynı optimizasyon sonucunu verir.
             </p>
             <h3>02 / Diferansiyel evrim</h3>
             <p>
@@ -954,7 +889,7 @@ function App() {
             <p>
               TÜİK/ADNKS mahalle nüfusu, yapı ve kadastro verisi, imar ve
               mülkiyet bilgisi, eğim/afet kısıtları, yol ağı ve gerçek maliyet
-              keşfi gerekir. 10.000 m² boş alan tespiti bu veriler olmadan
+              keşfi gerekir. 40.000 m² aday kare uygunluğu bu veriler olmadan
               yapılamaz. Sonuçlar mevcut haliyle bir senaryo prototipidir.
             </p>
             <button className="run" onClick={() => setModal(false)}>

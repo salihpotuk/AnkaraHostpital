@@ -27,14 +27,14 @@ jobs:
       - name: Install verified OSM tooling
         run: sudo apt-get update && sudo apt-get install -y osmium-tool
       - name: Download current Turkey OSM extract
-        run: curl --fail --location --retry 4 --retry-all-errors --output /tmp/turkey.osm.pbf https://download.geofabrik.de/europe/turkey-latest.osm.pbf
+        run: curl --fail --location --retry 4 --retry-all-errors --output /tmp/turkey-latest.osm.pbf https://download.geofabrik.de/europe/turkey-latest.osm.pbf
       - name: Verify published checksum
         run: |
           curl --fail --location --retry 4 --output /tmp/turkey.osm.pbf.md5 https://download.geofabrik.de/europe/turkey-latest.osm.pbf.md5
           cd /tmp && md5sum --check turkey.osm.pbf.md5
       - name: Extract Ankara and relevant structures
         run: |
-          osmium extract --polygon src/ankara-boundary.json /tmp/turkey.osm.pbf --output /tmp/ankara.osm.pbf --overwrite
+          osmium extract --polygon src/ankara-boundary.json /tmp/turkey-latest.osm.pbf --output /tmp/ankara.osm.pbf --overwrite
           osmium tags-filter /tmp/ankara.osm.pbf w/building w/building:part w/highway wr/amenity=hospital wr/healthcare=hospital --output /tmp/ankara-filtered.osm.pbf --overwrite
           osmium export /tmp/ankara-filtered.osm.pbf --output /tmp/ankara-filtered.geojson --overwrite
       - name: Generate checked 200 metre grid and local context
@@ -44,6 +44,6 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/data/ankara-grid.json src/data/ankara-context.geojson
+          git add src/data/ankara-grid.json src/data/ankara-context.json
           git diff --cached --quiet || git commit -m "data: refresh offline Ankara grid"
           git push

@@ -1,15 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { evaluate, optimize } from "./optimizer.js";
-import { squareFootprint } from "./land-screening.js";
 const candidates = Array.from({ length: 12 }, (_, i) => ({
   id: `fixture/${i}`,
   lat: 39.9 + i * 0.004,
   lng: 32.8,
-  area: 10000,
+  area: 40000,
   land: 30,
-  kind: "mapped-vacant",
-  footprint: squareFootprint(39.9 + i * 0.004, 32.8).geometry,
+  kind: "grid-empty",
 }));
 const p = {
   count: 6,
@@ -33,7 +31,7 @@ test("assignment conserves demand and uses unique supplied sites", () => {
     r.sites.every(
       (s) =>
         candidates.some((c) => c.id === s.id) &&
-        s.area === 10000 &&
+        s.area === 40000 &&
         s.beds >= 100 &&
         s.beds <= 500,
     ),
